@@ -63,11 +63,15 @@ import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import com.custom.iptvtv.AppState
+import com.custom.iptvtv.data.DnsProvider
 import com.custom.iptvtv.data.MediaItem
 import com.custom.iptvtv.data.MediaType
 import com.custom.iptvtv.net.Net
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.Request
 
 /**
  * Tam ekran oynatıcı (Media3). Kumanda:
@@ -94,6 +98,7 @@ fun PlayerScreen(state: AppState, items: List<MediaItem>, startIndex: Int) {
     var dur by remember { mutableLongStateOf(0L) }
     val retries = remember { intArrayOf(0) }
     val longPress = remember { booleanArrayOf(false) }
+    val probed = remember { booleanArrayOf(false) }
     val focus = remember { FocusRequester() }
 
     val dsFactory = remember { OkHttpDataSource.Factory(Net.client(state.prefs.dns)) }
@@ -129,6 +134,31 @@ fun PlayerScreen(state: AppState, items: List<MediaItem>, startIndex: Int) {
             }
 
             override fun onPlayerError(e: PlaybackException) {
+                val container = e.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED ||
+                    e.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED
+                if (container && !probed[0]) {
+                    // Biçim tanınmadı: içeriğin ilk baytlarına bakıp doğru biçimle bir kez daha dene
+                    probed[0] = true
+                    buffering = true
+                    val target = currentItem
+                    scope.launch {
+                        when (val kind = withContext(Dispatchers.IO) { probe(target, state.prefs.dns) }) {
+                            Probe.Hls -> reload(exo, target, MimeTypes.APPLICATION_M3U8)
+                            Probe.Ts -> reload(exo, target, MimeTypes.VIDEO_MP2T)
+                            is Probe.Bad -> { buffering = false; error = kind.message }
+                            Probe.Unknown -> {
+                                buffering = false
+                                error = "Bu yayın biçimi desteklenmiyor" + extHint(target.url) + " (${e.errorCodeName})"
+                            }
+                        }
+                    }
+                    return
+                }
+                if (container) {
+                    buffering = false
+                    error = "Yayın açılamadı (${e.errorCodeName})"
+                    return
+                }
                 if (retries[0] < 3) {
                     // Canlı yayınlar sık kopar: kısa beklemeyle kendiliğinden yeniden dene
                     retries[0]++
@@ -151,6 +181,7 @@ fun PlayerScreen(state: AppState, items: List<MediaItem>, startIndex: Int) {
     // Seçili öğe değişince (ilk açılış dahil) yeni yayını yükle
     LaunchedEffect(item.id) {
         retries[0] = 0
+        probed[0] = false
         error = null
         buffering = true
         pos = 0L
@@ -321,11 +352,64 @@ fun PlayerScreen(state: AppState, items: List<MediaItem>, startIndex: Int) {
 }
 
 @OptIn(UnstableApi::class)
-private fun buildExoItem(item: MediaItem): ExoItem {
+private fun buildExoItem(item: MediaItem, mime: String? = null): ExoItem {
     val b = ExoItem.Builder().setUri(item.url)
-    // Uzantısız/sorgulu HLS adreslerini ExoPlayer'a açıkça bildir
-    if (item.url.substringBefore('#').lowercase().contains(".m3u8")) b.setMimeType(MimeTypes.APPLICATION_M3U8)
+    when {
+        mime != null -> b.setMimeType(mime)
+        // Uzantısız/sorgulu HLS adreslerini ExoPlayer'a açıkça bildir
+        item.url.substringBefore('#').lowercase().contains(".m3u8") -> b.setMimeType(MimeTypes.APPLICATION_M3U8)
+    }
     return b.build()
+}
+
+@OptIn(UnstableApi::class)
+private fun reload(exo: ExoPlayer, item: MediaItem, mime: String) {
+    exo.setMediaItem(buildExoItem(item, mime))
+    exo.prepare()
+    exo.playWhenReady = true
+}
+
+private sealed interface Probe {
+    object Hls : Probe
+    object Ts : Probe
+    object Unknown : Probe
+    class Bad(val message: String) : Probe
+}
+
+/** Adresin ilk baytlarını okuyup gerçek biçimi (HLS / MPEG-TS / hata sayfası) anlamaya çalışır. */
+private fun probe(item: MediaItem, dns: DnsProvider): Probe = try {
+    val rb = Request.Builder().url(item.url).header("User-Agent", Net.UA)
+    item.headers.forEach { (k, v) -> rb.header(k, v) }
+    Net.client(dns).newCall(rb.build()).execute().use { r ->
+        if (!r.isSuccessful) {
+            val hint = when (r.code) {
+                401, 403, 458 -> " Kullanıcı adı/şifre, abonelik süresi veya aynı anda bağlantı sınırı (başka cihazda açık yayın) kontrol edilmeli."
+                404 -> " Kanal sunucuda bulunamadı; listeyi yenile."
+                else -> ""
+            }
+            Probe.Bad("Sunucu HTTP ${r.code} döndürdü.$hint")
+        } else {
+            val buf = ByteArray(1024)
+            val n = r.body?.byteStream()?.use { it.read(buf) } ?: -1
+            val head = if (n > 0) String(buf, 0, n, Charsets.ISO_8859_1).trimStart() else ""
+            val type = r.header("Content-Type")?.lowercase() ?: ""
+            when {
+                n <= 0 -> Probe.Bad("Sunucu boş yanıt verdi (kanal kapalı veya bağlantı sınırı dolu olabilir).")
+                head.startsWith("#EXTM3U") || type.contains("mpegurl") -> Probe.Hls
+                buf[0] == 0x47.toByte() && (n <= 188 || buf[188] == 0x47.toByte()) -> Probe.Ts
+                head.startsWith("<") || type.contains("html") ->
+                    Probe.Bad("Sunucu video yerine bir web sayfası/hata mesajı döndürdü (HTTP ${r.code}).")
+                else -> Probe.Unknown
+            }
+        }
+    }
+} catch (e: Exception) {
+    Probe.Bad("Sunucuya ulaşılamadı: " + (e.message ?: e.javaClass.simpleName))
+}
+
+private fun extHint(url: String): String {
+    val ext = url.substringBefore('?').substringBefore('#').substringAfterLast('/', "").substringAfterLast('.', "").lowercase()
+    return if (ext.isNotEmpty() && ext.length <= 5) " (.$ext)" else ""
 }
 
 private fun formatTime(ms: Long): String {

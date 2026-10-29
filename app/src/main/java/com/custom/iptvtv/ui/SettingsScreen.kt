@@ -14,16 +14,19 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,7 +37,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.custom.iptvtv.AppState
 import com.custom.iptvtv.data.DnsProvider
+import com.custom.iptvtv.net.RemoteServer
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun SettingsScreen(state: AppState) {
@@ -47,6 +54,15 @@ fun SettingsScreen(state: AppState) {
     var haHook by remember { mutableStateOf(prefs.haWebhook) }
     var newName by remember { mutableStateOf("") }
     var newUrl by remember { mutableStateOf("") }
+    var xName by remember { mutableStateOf("") }
+    var xHost by remember { mutableStateOf("") }
+    var xUser by remember { mutableStateOf("") }
+    var xPass by remember { mutableStateOf("") }
+    var remote by remember { mutableStateOf<RemoteServer.Info?>(null) }
+    var remoteErr by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    // Ayarlar'dan çıkınca telefon/PC erişimi otomatik kapanır
+    DisposableEffect(Unit) { onDispose { RemoteServer.stop() } }
     val first = remember { FocusRequester() }
     LaunchedEffect(Unit) { delay(80); runCatching { first.requestFocus() } }
 
@@ -76,6 +92,53 @@ fun SettingsScreen(state: AppState) {
                 ActionButton("Ekle", { if (state.addSource(newName, newUrl)) { newName = ""; newUrl = "" } }, icon = Icons.Filled.Add, primary = true)
             }
         }
+        // ---- Xtream Codes ----
+        item { SectionTitle("Xtream Codes ile ekle") }
+        item { AppTextField(xHost, { xHost = it }, "Sunucu (örn. http://1.2.3.4:8080)", Modifier.fillMaxWidth(), KeyboardType.Uri) }
+        item {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                AppTextField(xUser, { xUser = it }, "Kullanıcı adı", Modifier.weight(1f))
+                AppTextField(xPass, { xPass = it }, "Şifre", Modifier.weight(1f))
+                ActionButton("Ekle", {
+                    if (state.addXtream(xName, xHost, xUser, xPass)) { xName = ""; xHost = ""; xUser = ""; xPass = "" }
+                }, icon = Icons.Filled.Add, primary = true)
+            }
+        }
+
+        // ---- Telefon / PC ----
+        item { SectionTitle("Telefondan veya bilgisayardan ekle") }
+        item {
+            ActionButton(
+                if (remote == null) "Telefondan / PC'den eklemeyi aç" else "Telefondan eklemeyi kapat",
+                {
+                    if (remote == null) {
+                        scope.launch {
+                            val info = withContext(Dispatchers.IO) { RemoteServer.start(state) }
+                            remote = info
+                            remoteErr = info == null
+                        }
+                    } else {
+                        RemoteServer.stop()
+                        remote = null
+                    }
+                },
+                icon = Icons.Filled.PhoneAndroid
+            )
+        }
+        remote?.let { info ->
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Aynı Wi-Fi'deki telefon veya bilgisayarın tarayıcısında şu adresi aç:", color = Pal.Muted)
+                    Text(info.url, style = MaterialTheme.typography.titleLarge, color = Pal.Accent)
+                    Text("PIN: ${info.pin}", style = MaterialTheme.typography.titleMedium, color = Pal.Text)
+                    Text("Formu orada doldur; liste TV'ye otomatik eklenir. Bu ekrandan çıkınca erişim kapanır.", color = Pal.Muted, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        if (remoteErr) {
+            item { Text("Yerel ağ adresi bulunamadı. TV'nin Wi-Fi/Ethernet'e bağlı olduğunu kontrol et.", color = Pal.Danger) }
+        }
+
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 ActionButton(if (state.loading) "Güncelleniyor…" else "Listeleri şimdi güncelle", { state.refresh() }, Modifier.focusRequester(first), Icons.Filled.Refresh)

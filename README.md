@@ -13,6 +13,10 @@ Android TV / Google TV için sıfırdan yazılmış IPTV ve medya oynatıcı. Ko
 
 **Yol 3 – Komut satırı**: JDK 17 + Android SDK 34 ile `gradle :app:assembleRelease` (Gradle 8.5).
 
+## Liste ekleme (kumandasız, kolay yol)
+- **Ayarlar → Xtream Codes ile ekle**: sunucu, kullanıcı adı, şifre gir; M3U adresi otomatik kurulur.
+- **Ayarlar → Telefondan / PC'den eklemeyi aç**: TV bir adres ve 4 haneli PIN gösterir. Aynı Wi-Fi'deki telefon/PC tarayıcısında o adresi açıp Xtream veya M3U bilgilerini klavyeyle gir. Erişim yalnızca Ayarlar ekranı açıkken çalışır, PIN her açılışta değişir, 5 yanlış denemede kilitlenir.
+
 ## TV'ye yükleme
 TV'de Geliştirici seçenekleri → USB/Ağ hata ayıklamayı aç, sonra:
 `adb connect <tv-ip>:5555` ve `adb install app-release.apk`

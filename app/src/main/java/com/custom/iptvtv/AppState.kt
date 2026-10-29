@@ -21,6 +21,7 @@ import com.custom.iptvtv.data.MediaItem
 import com.custom.iptvtv.data.Prefs
 import com.custom.iptvtv.data.Repository
 import com.custom.iptvtv.data.Source
+import com.custom.iptvtv.data.Xtream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -66,6 +67,7 @@ class AppState(app: Application) {
     var history by mutableStateOf(prefs.history)
 
     private var haJob: Job? = null
+    private var pendingRefresh = false
 
     /** Açılışta önce önbellekten (anında), sonra arka planda tazele. */
     fun start() {
@@ -76,7 +78,7 @@ class AppState(app: Application) {
     }
 
     fun refresh(force: Boolean = true) {
-        if (loading) return
+        if (loading) { pendingRefresh = true; return }
         scope.launch {
             loading = true
             status = null
@@ -92,6 +94,7 @@ class AppState(app: Application) {
             webRadios = withContext(Dispatchers.IO) { runCatching { repo.loadRadios(force) }.getOrNull() } ?: webRadios
             status = errors.firstOrNull()
             loading = false
+            if (pendingRefresh) { pendingRefresh = false; refresh(force = false) }
         }
     }
 
@@ -102,17 +105,31 @@ class AppState(app: Application) {
     }
 
     // ---- kaynaklar ----
-    fun addSource(name: String, url: String): Boolean {
+    /** Başarılıysa null, değilse kullanıcıya gösterilecek hata metni döner. */
+    fun tryAddSource(name: String, url: String): String? {
         val u = url.trim()
-        if (!u.startsWith("http://", true) && !u.startsWith("https://", true)) {
-            status = "Geçerli bir http(s) adresi gir"; return false
-        }
-        if (sources.any { it.url == u }) { status = "Bu kaynak zaten ekli"; return false }
+        if (!u.startsWith("http://", true) && !u.startsWith("https://", true)) return "Geçerli bir http(s) adresi gir"
+        if (sources.any { it.url == u }) return "Bu kaynak zaten ekli"
         val n = name.trim().ifEmpty { Uri.parse(u).host ?: "Liste" }
         sources = sources + Source(n, u)
         prefs.sources = sources
         refresh()
+        return null
+    }
+
+    fun addSource(name: String, url: String): Boolean {
+        val err = tryAddSource(name, url)
+        if (err != null) { status = err; return false }
         return true
+    }
+
+    /** Xtream Codes bilgilerinden M3U adresi kurup ekler. */
+    fun addXtream(name: String, host: String, user: String, pass: String): Boolean {
+        val url = Xtream.buildUrl(host, user, pass) ?: run {
+            status = "Sunucu, kullanıcı adı ve şifre gerekli"
+            return false
+        }
+        return addSource(name, url)
     }
 
     fun removeSource(s: Source) {
