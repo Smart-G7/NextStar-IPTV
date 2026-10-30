@@ -7,26 +7,31 @@ Android TV / Google TV için sıfırdan yazılmış IPTV ve medya oynatıcı. Ko
 **Yol 1 – GitHub Actions (önerilen, bilgisayarda kurulum gerekmez)**
 1. Bu klasörün içeriğini yeni bir GitHub deposuna yükle (`main` dalı).
 2. Depoda *Actions → Build APK → Run workflow* (push de otomatik tetikler).
-3. İş bitince deponun sağındaki *Releases* bölümünden `app-release.apk` dosyasını doğrudan indir (alternatif: Actions sayfasındaki *Artifacts → NextStarIPTV-apk*).
+3. İş bitince sayfanın altındaki *Artifacts → NextStarIPTV-apk* dosyasını indir, zip'ten `app-release.apk` çıkar.
 
 **Yol 2 – Android Studio**: klasörü aç (Iguana/Hedgehog+, JDK 17), *Build → Build APK(s)*.
 
 **Yol 3 – Komut satırı**: JDK 17 + Android SDK 34 ile `gradle :app:assembleRelease` (Gradle 8.5).
-
-## Liste ekleme (kumandasız, kolay yol)
-- **Ayarlar → Xtream Codes ile ekle**: sunucu, kullanıcı adı, şifre gir; M3U adresi otomatik kurulur.
-- **Ayarlar → Telefondan / PC'den eklemeyi aç**: TV bir adres ve 4 haneli PIN gösterir. Aynı Wi-Fi'deki telefon/PC tarayıcısında o adresi açıp Xtream veya M3U bilgilerini klavyeyle gir. Erişim yalnızca Ayarlar ekranı açıkken çalışır, PIN her açılışta değişir, 5 yanlış denemede kilitlenir.
 
 ## TV'ye yükleme
 TV'de Geliştirici seçenekleri → USB/Ağ hata ayıklamayı aç, sonra:
 `adb connect <tv-ip>:5555` ve `adb install app-release.apk`
 (ya da APK'yı USB bellek / "Send Files to TV" ile aktarıp dosya yöneticisinden kur).
 
+## Yenilikler (v2.1)
+- **Radyo:** kompakt liste (varsayılan) veya küçük kartlı ızgara; çıkınca listede kaldığın satıra döner. Çalarken ICY bilgisi (sanatçı – şarkı, istasyon adı) gösterilir; bu, internet radyosunun RDS karşılığıdır. Arka plan Ayarlar'dan seçilir: koyu gradyan, radyo logosu, görsel veya video (adres ya da dosya).
+- **Film/Dizi:** ▼ tuşu (veya Menü/Altyazı tuşu) ile ses ve altyazı seçimi; seçtiğin dil sonraki videolar için hatırlanır. Ayarlar'da varsayılan dil de seçilebilir.
+- **Tarayıcı:** favoriler. Sayfadayken kumandadaki Menü tuşu sayfayı favoriye ekler; adres yazıp "Favori ekle" ya da son açılanlardan yıldız da kullanılabilir.
+- **Çökme kaydı:** uygulama çökerse yığın izi kaydedilir, sonraki açılışta Ana Sayfa ve Ayarlar'da görünür.
+- **Bellek:** büyük listelerde RAM kullanımı belirgin azaldı, `largeHeap` açıldı.
+
 ## Kumanda
 | Tuş | Menü | Oynatıcı |
 |---|---|---|
 | OK | seç | duraklat / devam |
 | OK (uzun bas) | – | favori ekle/çıkar |
+| ▼ (film/dizi) | gezin | ses ve altyazı menüsü |
+| Menü | tarayıcıda: favori ekle | ses/altyazı menüsü (canlı TV'de) |
 | ◀ ▶ | gezin | VOD: ±10 sn |
 | ▲ ▼ | gezin | Canlı: önceki/sonraki kanal |
 | CH+/CH−, ⏭/⏮ | – | kanal/bölüm değiştir |
@@ -36,10 +41,3 @@ TV'de Geliştirici seçenekleri → USB/Ağ hata ayıklamayı aç, sonra:
 - Release APK, kolay kurulum için **debug anahtarıyla** imzalanır. Dağıtacaksan `app/build.gradle.kts` içinde kendi imza anahtarını tanımla.
 - Açık metin (http) trafiğe izin verilir; IPTV akışlarının çoğu http'dir.
 - Ağ DNS'i Ayarlar'dan seçilir; DoH önce denenir, olmazsa sistem DNS'ine düşer.
-
-## Bu sürümdeki düzeltmeler
-- `Root` (ana iskelet) eksikti → eklendi: sol menü, sekmeler, tam ekran oynatıcı/tarayıcı geçişi, Geri davranışı.
-- `PlayerScreen.kt` v1'den kalma, projede olmayan sınıflara (`SmartDnsClient`, `SettingsManager`, `WatchlistManager`) bağlıydı → Media3 ile sıfırdan yazıldı (DoH istemcisi, öğe başlıkları, donanım/yazılım çözücü ayarı, otomatik yeniden deneme, kumanda tuşları, HA bildirimi).
-- Filmler / Diziler / Radyo sekmelerinin ekranı yoktu → `BrowseScreen.kt` eklendi (grup çipleri, arama, favori, gizle).
-- Tarayıcıdan yakalanan videoda WebView'in ham başlıkları (Range, Accept-Encoding) ExoPlayer'a aktarılıyordu → yalnızca User-Agent/Referer/Cookie aktarılıyor.
-- Grup adı "Tümü" olan listelerde Canlı TV ekranının çökmesi önlendi.
